@@ -71,7 +71,30 @@ function setup(){
   read -p "Type a username for basic user : " -e USERNAME
   read -p "Type a hostname for computers name : " -e NEW_HOSTNAME
   read -p "Type a password for encryption : " -e PASSWORD
-  read -p "Which environment do you want : [kde,gnome,lxde] " -e GRAPH_ENV
+
+  while [[ -z ${YN} ]]; do
+    read -p "Which environment do you want : [kde,gnome,lxde] " response
+    case $response in
+        kde|Kde|KDE)
+          local YN=true
+          GRAPH_ENV="kde"
+            ;;
+        gnome|Gnome|GNOME)
+          local YN=true
+          GRAPH_ENV="gnome"
+          ;;
+        lxde|Lxde|LXDE)
+          local YN=true
+          GRAPH_ENV="lxde"
+          ;;
+        *)
+          echo "Mmmmh... don't understand, only Y or N are authorized. And I'm sure you can do it."
+            ;;
+    esac
+  done
+  unset YN
+  unset response
+
 
   while [[ -z ${YN} ]]; do
     read -p "Install on virtualbox ? [Y/N] " response
@@ -108,7 +131,7 @@ function setup(){
       case $response in
           [yY][eE][sS][oO]|[yY])
             local YN=true
-            
+
             info "Disk is formatting..."
             format_disk
             info "Disk formatted sucessful"
@@ -244,7 +267,7 @@ function prepare_chroot(){
   #Chrooting in the new system
   info "Preparing chroot"
   cp $0 /mnt/ArchSecure.sh
-  arch-chroot /mnt ./ArchSecure.sh --configure ${DISK} ${USERNAME} ${PASSWORD} ${NEW_HOSTNAME} ${VIRTUALBOX}
+  arch-chroot /mnt ./ArchSecure.sh --configure ${DISK} ${USERNAME} ${PASSWORD} ${NEW_HOSTNAME} ${VIRTUALBOX} ${GRAPH_ENV}
 }
 
 function configure(){
@@ -254,6 +277,7 @@ function configure(){
   local PASSWORD=$4
   local NEW_HOSTNAME=$5
   local VIRTUALBOX=$6
+  local GRAPH_ENV=$7
 
   echo "Exporting timezone"
   LANG="fr_FR.UTF-8"
@@ -286,8 +310,8 @@ function configure(){
   echo "Install Virtualbox graphics"
   install_graphic_drivers $VIRTUALBOX
 
-  echo "Install lxde"
-  install_lxde
+  echo "Install graphic environment"
+  install_graphic_environment ${GRAPH_ENV}
 
   echo "Clean up installation"
   clean_desktop
@@ -367,10 +391,18 @@ function install_graphic_drivers(){
   fi
 }
 
-function install_lxde(){
+function install_graphic_environment(){
   #Install the graphic environment
-  pacman -S lxde lxdm --noconfirm
-  systemctl enable lxdm
+  if [[ ${GRAPH_ENV} == "kde" ]]; then
+    pacman -Syu plasma kde-applications kde-l10n-fr sddm
+    systemctl enable sddm
+  elif [[ ${GRAPH_ENV} == "gnome" ]]; then
+    pacman -Syu gnome gnome-extra gdm
+    systemctl enable gdm
+  elif [[ ${GRAPH_ENV} == "lxde" ]]; then
+    pacman -S lxde lxdm --noconfirm
+    systemctl enable lxdm
+  fi
 }
 
 function clean_desktop(){
@@ -395,7 +427,7 @@ function help(){
 case "$1" in
     -i|--install) setup;;
     -v|--version) echo "ArchSecure version ${__version}" && exit 0;;
-    -c|--configure) configure $1 $2 $3 $4 $5 $6;;
+    -c|--configure) configure $1 $2 $3 $4 $5 $6 $7;;
     -h|--help) help;;
      *) echo >&2 \
      "usage: $0 [--install]"
