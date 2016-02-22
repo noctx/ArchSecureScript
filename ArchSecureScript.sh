@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# ArchSecure. Copyright (c) 2014, by Nicolas Briand & Anthony Thuilliez        #
+# ArchSecure. Copyright (c) 2016, by Nicolas Briand & Anthony Thuilliez        #
 ################################################################################
 
 # set -o xtrace #Enable it to trace what gets executed. Useful for developpement
 
-echo "╔═╗┬─┐┌─┐┬ ┬╔═╗┌─┐┌─┐┬ ┬┬─┐┌─┐"
-echo "╠═╣├┬┘│  ├─┤╚═╗├┤ │  │ │├┬┘├┤ "
-echo "╩ ╩┴└─└─┘┴ ┴╚═╝└─┘└─┘└─┘┴└─└─┘"
+echo "╔═╗┬─┐┌─┐┬ ┬╔═╗┌─┐┌─┐┬ ┬┬─┐┌─┐╔═╗┌─┐┬─┐┬┌─┐┌┬┐"
+echo "╠═╣├┬┘│  ├─┤╚═╗├┤ │  │ │├┬┘├┤ ╚═╗│  ├┬┘│├─┘ │ "
+echo "╩ ╩┴└─└─┘┴ ┴╚═╝└─┘└─┘└─┘┴└─└─┘╚═╝└─┘┴└─┴┴   ┴ "
 
 __editor="Nicolas Briand & Anthony Thuilliez"
 __version="1.0.0"
@@ -22,6 +22,9 @@ echo ""
 
 # ### Debugging stuff begin here ### #
 set -o errexit #script exit if failure occure #We call allow failure by adding || true after commands
+
+#set -o nounset #TODO try script with this
+
 function _fmt (){
   #Initialize color variables
   local color_ok="\x1b[32m"
@@ -169,7 +172,7 @@ function setup(){
               ;;
           [nN])
             local YN=true
-            info "Okay... Good Bye motherfucker !"
+            info "Okay... Good Bye !"
             exit 0
             ;;
           *)
