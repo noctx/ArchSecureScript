@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ArchSecure. Copyright (c) 2016, by Nicolas Briand & Anthony Thuilliez        #
+# ArchSecureScript. Copyright (c) 2016, by Nicolas Briand & Anthony Thuilliez        #
 ################################################################################
 
 # set -o xtrace #Enable it to trace what gets executed. Useful for developpement
@@ -76,6 +76,25 @@ function setup(){
   read -p "Type a password for encryption : " -e PASSWORD
 
   while [[ -z ${YN} ]]; do
+    read -p "UEFI mode ? [Y/N] " response
+    case $response in
+        Y|YES|yes|y|Yes)
+          local YN=true
+          UEFI=true
+            ;;
+        N|NO|no|n|No)
+          local YN=true
+          UEFI=false
+          ;;
+        *)
+          echo "Mmmmh... don't understand, only Y or N are authorized. And I'm sure you can do it."
+            ;;
+    esac
+  done
+  unset YN
+  unset response
+
+  while [[ -z ${YN} ]]; do
     read -p "Which environment do you want : [kde,gnome,lxde] " response
     case $response in
         kde|Kde|KDE)
@@ -127,6 +146,7 @@ function setup(){
   info "Password: ${PASSWORD}"
   info "VIRTUALBOX: ${VIRTUALBOX}"
   info "Graphic environment: ${GRAPH_ENV}"
+  info "UEFI: ${UEFI}"
   if [[ -e ${DISK} ]]; then #Test if the choosen disk exist
     while [ -z ${YN} ]
     do
@@ -208,21 +228,38 @@ function create_partitions(){
   # |                        LUKS encrypted partition                       | |                |
   # |                          /dev/sdaX                                    | | /dev/sdbY      |
   # +-----------------------------------------------------------------------+ +----------------+
-  parted -s ${DISK}\
-  mklabel gpt \
-  mkpart primary ext4 1MB 2MB \
-  mkpart primary ext4 2MB 402MB \
-  mkpart primary ext4 402MB 100% \
-  set 1 bios_grub on \
-  set 3 lvm on \
-  name 1 bios_grub \
-  name 2 boot \
-  name 3 root_lvm || emergency "Something went wrong with partitioning. You can investigate. Exit 1. "
+  if [[ ${UEFI} == true ]]; then
+    parted -s ${DISK}\
+    mklabel gpt \
+    mkpart primary ext4 4096s 512MB \
+    mkpart primary ext4 512MB 100% \
+    set 1 boot on \
+    set 2 lvm on \
+    name 1 boot \
+    name 2 root_lvm || emergency "Something went wrong with partitioning. You can investigate. Exit 1. "
+  elif [[ ${UEFI} == false ]]; then
+    parted -s ${DISK}\
+    mklabel gpt \
+    mkpart primary ext4 1MB 2MB \
+    mkpart primary ext4 2MB 402MB \
+    mkpart primary ext4 402MB 100% \
+    set 1 bios_grub on \
+    set 3 lvm on \
+    name 1 bios_grub \
+    name 2 boot \
+    name 3 root_lvm || emergency "Something went wrong with partitioning. You can investigate. Exit 1. "
+  fi
 }
 
 function prepare_disk(){
-  echo "${PASSWORD}" | cryptsetup -v --cipher aes-xts-plain64 luksFormat ${DISK}3 #It encrypt the LVM using LUKS format with cipher aes-xts-plain64
-  echo "${PASSWORD}" | cryptsetup open --type luks ${DISK}3 lvm #It open the lvm, the decrypted container is now available at /dev/mapper/lvm.
+  if [[ ${UEFI} == true ]]; then
+    echo "${PASSWORD}" | cryptsetup -v --cipher aes-xts-plain64 luksFormat ${DISK}2 #It encrypt the LVM using LUKS format with cipher aes-xts-plain64
+    echo "${PASSWORD}" | cryptsetup open --type luks ${DISK}2 lvm #It open the lvm, the decrypted container is now available at /dev/mapper/lvm.
+  elif [[ ${UEFI} == false ]]; then
+    echo "${PASSWORD}" | cryptsetup -v --cipher aes-xts-plain64 luksFormat ${DISK}3 #It encrypt the LVM using LUKS format with cipher aes-xts-plain64
+    echo "${PASSWORD}" | cryptsetup open --type luks ${DISK}3 lvm #It open the lvm, the decrypted container is now available at /dev/mapper/lvm.
+  fi
+
 }
 
 function prepare_lvm(){
@@ -230,8 +267,8 @@ function prepare_lvm(){
   vgcreate storage /dev/mapper/lvm #Create the volume group named MyStorage, adding the previously created physical volume to it
 
   #Create all logical volumes on the volume group
-  lvcreate -l 20%VG storage -n swapvol
-  lvcreate -l 40%VG storage -n rootvol
+  lvcreate -l 3%VG storage -n swapvol
+  lvcreate -l 25%VG storage -n rootvol
   lvcreate -l +100%FREE storage -n homevol
 
   #Format filesystems on each logical volume
@@ -249,16 +286,28 @@ function mount_fs(){
 }
 
 function prepare_boot(){
+  if [[ ${UEFI} == true ]]; then
+    mkfs.fat -F32 ${DISK}1
+    mkdir -p /mnt/boot/efi
+    mount ${DISK}1 /mnt/boot/efi
+  elif [[ ${UEFI} == false ]]; then
+    mkfs.ext2 ${DISK}2
+    mkdir /mnt/boot
+    mount ${DISK}2 /mnt/boot
+  fi
   #Convert /boot to ext2 format which is the standard for boot partition
-  mkfs.ext2 ${DISK}2
-  mkdir /mnt/boot
-  mount ${DISK}2 /mnt/boot
+
 }
 
 function install_base(){
   #Install the basic system (GNU)
   #You need to add base-devel for some stuff like Yaourt
-  pacstrap /mnt base base-devel grub xdg-user-dirs git
+
+  if [[ ${UEFI} == true ]]; then
+    pacstrap /mnt base base-devel grub xdg-user-dirs git efibootmgr
+  elif [[ ${UEFI} == false ]]; then
+    pacstrap /mnt base base-devel grub xdg-user-dirs git
+  fi
 }
 
 function generate_fstab(){
@@ -270,7 +319,7 @@ function prepare_chroot(){
   #Chrooting in the new system
   info "Preparing chroot"
   cp $0 /mnt/ArchSecure.sh
-  arch-chroot /mnt ./ArchSecure.sh --configure ${DISK} ${USERNAME} ${PASSWORD} ${NEW_HOSTNAME} ${VIRTUALBOX} ${GRAPH_ENV}
+  arch-chroot /mnt ./ArchSecure.sh --configure ${DISK} ${USERNAME} ${PASSWORD} ${NEW_HOSTNAME} ${VIRTUALBOX} ${GRAPH_ENV} ${UEFI}
 }
 
 function configure(){
@@ -281,7 +330,7 @@ function configure(){
   local NEW_HOSTNAME=$5
   local VIRTUALBOX=$6
   local GRAPH_ENV=$7
-
+  local UEFI=$8
   echo "Exporting timezone"
   LANG="fr_FR.UTF-8"
   export LANG=fr_FR.UTF-8
@@ -328,19 +377,28 @@ function install_bootloader(){
   systemctl enable lvm2-lvmetad.service
 
   #Install grub on disk
-  grub-install --target=i386-pc ${DISK}
+  if [[ ${UEFI} == true ]]; then
+    echo "GRUB_ENABLE_CRYPTODISK=y" >> /etc/default/grub
+    sed -i 's|base udev|base udev encrypt lvm2|g' /etc/mkinitcpio.conf
+    #Edit grub config to inform it where is the encrypted device and the root device
+    sed -i "s|GRUB_CMDLINE_LINUX\=\"|GRUB_CMDLINE_LINUX\=\"cryptdevice=UUID=${CRYPTDEVICE}:storage root=/dev/mapper/storage-rootvol|g" /etc/default/grub
+    mkinitcpio -p linux
+    grub-mkconfig -o /boot/grub/grub.cfg
+    grub-install ${DISK}
+  elif [[ ${UEFI} == false ]]; then
+    grub-install --target=i386-pc ${DISK}
+    #Edit mkinitcpio configuration to add encrypt and lvm2 module to HOOKS
+    sed -i 's|base udev|base udev encrypt lvm2|g' /etc/mkinitcpio.conf
 
-  #Edit mkinitcpio configuration to add encrypt and lvm2 module to HOOKS
-  sed -i 's|base udev|base udev encrypt lvm2|g' /etc/mkinitcpio.conf
+    #Edit grub config to inform it where is the encrypted device and the root device
+    sed -i "s|GRUB_CMDLINE_LINUX\=\"|GRUB_CMDLINE_LINUX\=\"cryptdevice=UUID=${CRYPTDEVICE}:storage root=/dev/mapper/storage-rootvol|g" /etc/default/grub
 
-  #Edit grub config to inform it where is the encrypted device and the root device
-  sed -i "s|GRUB_CMDLINE_LINUX\=\"|GRUB_CMDLINE_LINUX\=\"cryptdevice=UUID=${CRYPTDEVICE}:storage root=/dev/mapper/storage-rootvol|g" /etc/default/grub
+    #mkinitcpio will generate initramfs-linux.img and initramfs-linux-fallback.img to be able to boot
+    mkinitcpio -p linux
 
-  #mkinitcpio will generate initramfs-linux.img and initramfs-linux-fallback.img to be able to boot
-  mkinitcpio -p linux
-
-  #Make the grub configuration
-  grub-mkconfig -o /boot/grub/grub.cfg
+    #Make the grub configuration
+    grub-mkconfig -o /boot/grub/grub.cfg
+  fi
 }
 
 function create_basic_user(){
@@ -397,7 +455,7 @@ function install_graphic_drivers(){
 function install_graphic_environment(){
   #Install the graphic environment
   if [[ ${GRAPH_ENV} == "kde" ]]; then
-    pacman -Syu plasma kde-applications kde-l10n-fr sddm
+    pacman -Syu plasma kde-applications sddm yakuake firefox breeze-gtk kde-gtk-config
     systemctl enable sddm
   elif [[ ${GRAPH_ENV} == "gnome" ]]; then
     pacman -Syu gnome gnome-extra gdm
@@ -429,8 +487,8 @@ function help(){
 #Arguments parsing
 case "$1" in
     -i|--install) setup;;
-    -v|--version) echo "ArchSecure version ${__version}" && exit 0;;
-    -c|--configure) configure $1 $2 $3 $4 $5 $6 $7;;
+    -v|--version) echo "ArchSecureScript version ${__version}" && exit 0;;
+    -c|--configure) configure $1 $2 $3 $4 $5 $6 $7 $8;;
     -h|--help) help;;
      *) echo >&2 \
      "usage: $0 [--install]"
@@ -441,6 +499,7 @@ shift
 
 #Delete the script
 function cleanup_before_exit () {
+  exit
   umount -R /mnt || true
   info "Cleaning up. Done"
   # reboot
