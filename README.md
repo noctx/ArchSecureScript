@@ -15,4 +15,5 @@ Automatic installation of Archlinux with LVM on LUKS
 - Choose interactively between KDE, LXDE and GNOME interfaces.
 - Choose interactively your username, hostname and passwords
 
+##WARNING
 /!\ UEFI compatibility not ready
