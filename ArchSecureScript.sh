@@ -147,6 +147,8 @@ function setup(){
   info "VIRTUALBOX: ${VIRTUALBOX}"
   info "Graphic environment: ${GRAPH_ENV}"
   info "UEFI: ${UEFI}"
+  info "LVM: ${LVM}"
+  info "LUKS: ${LUKS}"
   if [[ -e ${DISK} ]]; then #Test if the choosen disk exist
     while [ -z ${YN} ]
     do
@@ -158,22 +160,41 @@ function setup(){
             info "Disk is formatting..."
             format_disk
             info "Disk formatted sucessful"
+            if[[ -z ${LVM} ]] && [[ -z ${LUKS} ]]; then
+              info "Creating partition"
+              create_partitions_lvm
+              info "Partition created sucessful"
 
-            info "Creating partition"
-            create_partitions
-            info "Partition created sucessful"
+              info "Preparing disk"
+              prepare_disk_lvm
+              info "Disk prepared sucessful"
 
-            info "Preparing disk"
-            prepare_disk
-            info "Disk prepared sucessful"
+              info "Preparing LVM"
+              prepare_lvm
+              info "LVM prepared"
 
-            info "Preparing LVM"
-            prepare_lvm
-            info "LVM prepared"
+              info "Mounting FileSystem"
+              mount_fs_lvm
+              info "FileSystem mounted sucessful"
+            elif [[ -z ${LUKS} ]]; then
+              info "Creating partition"
+              create_partitions_plain
+              info "Partition created sucessful"
 
-            info "Mounting FileSystem"
-            mount_fs
-            info "FileSystem mounted sucessful"
+              info "Preparing disk"
+              prepare_disk_plain
+              info "Disk prepared sucessful"
+
+              info "Preparing LVM"
+              prepare_lvm_plain
+              info "LVM prepared"
+
+              info "Mounting FileSystem"
+              mount_fs_plain
+              info "FileSystem mounted sucessful"
+            else
+              info "Install without LUKS not ready"
+            fi
 
             info "Preparing boot"
             prepare_boot
@@ -215,6 +236,144 @@ function format_disk(){
   # cryptsetup open --type plain ${DISK} container --key-file /dev/random
   # dd if=/dev/zero of=/dev/mapper/container status=progress
 }
+
+##########################################################
+#---------------------- LVM PART ------------------------#
+##########################################################
+
+function create_partitions_lvm(){
+  #It makes 3 partitions :
+  #bios_grub of 1024Kb for grub on GPT table (Without this partitions, the bootloader will not work)
+  #boot of 400Mb for /boot
+  #home of 100% free for /home
+  # +-----------------------------------------------------------------------+ +----------------+
+  # | Logical volume1       | Logical volume2       | Logical volume3       | |                |
+  # |/dev/storage/swapvol   |/dev/storage/rootvol   |/dev/storage/homevol   | | Boot partition |
+  # |_ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _| | (may be on     |
+  # |                                                                       | | other device)  |
+  # |                        LUKS encrypted partition                       | |                |
+  # |                          /dev/sdaX                                    | | /dev/sdbY      |
+  # +-----------------------------------------------------------------------+ +----------------+
+  if [[ ${UEFI} == true ]]; then
+    parted -s ${DISK}\
+    mklabel gpt \
+    mkpart primary ext4 4096s 512MB \
+    mkpart primary ext4 512MB 100% \
+    set 1 boot on \
+    set 2 lvm on \
+    name 1 boot \
+    name 2 root_lvm || emergency "Something went wrong with partitioning. You can investigate. Exit 1. "
+  elif [[ ${UEFI} == false ]]; then
+    parted -s ${DISK}\
+    mklabel gpt \
+    mkpart primary ext4 1MB 2MB \
+    mkpart primary ext4 2MB 402MB \
+    mkpart primary ext4 402MB 100% \
+    set 1 bios_grub on \
+    set 3 lvm on \
+    name 1 bios_grub \
+    name 2 boot \
+    name 3 root_lvm || emergency "Something went wrong with partitioning. You can investigate. Exit 1. "
+  fi
+}
+
+function prepare_disk_lvm(){
+  if [[ ${UEFI} == true ]]; then
+    echo "${PASSWORD}" | cryptsetup -v --cipher aes-xts-plain64 luksFormat ${DISK}2 #It encrypt the LVM using LUKS format with cipher aes-xts-plain64
+    echo "${PASSWORD}" | cryptsetup open --type luks ${DISK}2 lvm #It open the lvm, the decrypted container is now available at /dev/mapper/lvm.
+  elif [[ ${UEFI} == false ]]; then
+    echo "${PASSWORD}" | cryptsetup -v --cipher aes-xts-plain64 luksFormat ${DISK}3 #It encrypt the LVM using LUKS format with cipher aes-xts-plain64
+    echo "${PASSWORD}" | cryptsetup open --type luks ${DISK}3 lvm #It open the lvm, the decrypted container is now available at /dev/mapper/lvm.
+  fi
+
+}
+
+function prepare_lvm(){
+  pvcreate /dev/mapper/lvm #Create a physical volume on top of the opened LUKS container
+  vgcreate storage /dev/mapper/lvm #Create the volume group named MyStorage, adding the previously created physical volume to it
+
+  #Create all logical volumes on the volume group
+  lvcreate -l 3%VG storage -n swapvol
+  lvcreate -l 25%VG storage -n rootvol
+  lvcreate -l +100%FREE storage -n homevol
+
+  #Format filesystems on each logical volume
+  mkfs.ext4 /dev/mapper/storage-rootvol
+  mkfs.ext4 /dev/mapper/storage-homevol
+  mkswap /dev/mapper/storage-swapvol
+}
+
+function mount_fs_lvm(){
+  #Mount each filesystems
+  mount /dev/storage/rootvol /mnt
+  mkdir /mnt/home
+  mount /dev/storage/homevol /mnt/home
+  swapon /dev/storage/swapvol
+}
+
+##########################################################
+#---------------------- PLAIN PART ------------------------#
+##########################################################
+
+function create_partitions_plain(){
+  #It makes 3 partitions :
+  #bios_grub of 1024Kb for grub on GPT table (Without this partitions, the bootloader will not work)
+  #boot of 400Mb for /boot
+  #home of 100% free for /home
+  # +-----------------------------------------------------------------------+ +----------------+
+  # | Logical volume1       | Logical volume2       | Logical volume3       | |                |
+  # |/dev/storage/swapvol   |/dev/storage/rootvol   |/dev/storage/homevol   | | Boot partition |
+  # |_ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _ _ _ _ _| | (may be on     |
+  # |                                                                       | | other device)  |
+  # |                        LUKS encrypted partition                       | |                |
+  # |                          /dev/sdaX                                    | | /dev/sdbY      |
+  # +-----------------------------------------------------------------------+ +----------------+
+  if [[ ${UEFI} == true ]]; then
+    parted -s ${DISK}\
+    mklabel gpt \
+    mkpart primary ext4 4096s 512MB \
+    mkpart primary ext4 512MB 100% \
+    set 1 boot on \
+    set 2 lvm on \
+    name 1 boot \
+    name 2 root_lvm || emergency "Something went wrong with partitioning. You can investigate. Exit 1. "
+  elif [[ ${UEFI} == false ]]; then
+    parted -s ${DISK}\
+    mklabel gpt \
+    mkpart primary ext4 1MB 2MB \
+    mkpart primary ext4 2MB 402MB \
+    mkpart primary ext4 402MB 100% \
+    set 1 bios_grub on \
+    set 3 lvm on \
+    name 1 bios_grub \
+    name 2 boot \
+    name 3 root_lvm || emergency "Something went wrong with partitioning. You can investigate. Exit 1. "
+  fi
+}
+
+function prepare_disk_plain(){
+  if [[ ${UEFI} == true ]]; then
+    echo "${PASSWORD}" | cryptsetup -v --cipher aes-xts-plain64 luksFormat ${DISK}2 #It encrypt the LVM using LUKS format with cipher aes-xts-plain64
+    echo "${PASSWORD}" | cryptsetup open --type luks ${DISK}2 lvm #It open the lvm, the decrypted container is now available at /dev/mapper/lvm.
+  elif [[ ${UEFI} == false ]]; then
+    echo "${PASSWORD}" | cryptsetup -v --cipher aes-xts-plain64 luksFormat ${DISK}3 #It encrypt the LVM using LUKS format with cipher aes-xts-plain64
+    echo "${PASSWORD}" | cryptsetup open --type luks ${DISK}3 lvm #It open the lvm, the decrypted container is now available at /dev/mapper/lvm.
+  fi
+
+}
+
+function mount_fs_plain(){
+  #Mount each filesystems
+  mount /dev/storage/rootvol /mnt
+  mkdir /mnt/home
+  mount /dev/storage/homevol /mnt/home
+  swapon /dev/storage/swapvol
+}
+
+##########################################################
+#---------------------- NORMAL PART ---------------------#
+##########################################################
+
 function create_partitions(){
   #It makes 3 partitions :
   #bios_grub of 1024Kb for grub on GPT table (Without this partitions, the bootloader will not work)
@@ -262,21 +421,6 @@ function prepare_disk(){
 
 }
 
-function prepare_lvm(){
-  pvcreate /dev/mapper/lvm #Create a physical volume on top of the opened LUKS container
-  vgcreate storage /dev/mapper/lvm #Create the volume group named MyStorage, adding the previously created physical volume to it
-
-  #Create all logical volumes on the volume group
-  lvcreate -l 3%VG storage -n swapvol
-  lvcreate -l 25%VG storage -n rootvol
-  lvcreate -l +100%FREE storage -n homevol
-
-  #Format filesystems on each logical volume
-  mkfs.ext4 /dev/mapper/storage-rootvol
-  mkfs.ext4 /dev/mapper/storage-homevol
-  mkswap /dev/mapper/storage-swapvol
-}
-
 function mount_fs(){
   #Mount each filesystems
   mount /dev/storage/rootvol /mnt
@@ -284,6 +428,10 @@ function mount_fs(){
   mount /dev/storage/homevol /mnt/home
   swapon /dev/storage/swapvol
 }
+
+##########################################################
+#-------------------------- END -------------------------#
+##########################################################
 
 function prepare_boot(){
   if [[ ${UEFI} == true ]]; then
@@ -443,7 +591,6 @@ function install_xorg(){
   pacman -Syu xorg-server xorg-xinit xorg-server-utils --noconfirm
 }
 
-
 function install_graphic_drivers(){
   if [[ ${VIRTUALBOX} == true ]]; then
     pacman -Syu virtualbox-guest-utils --noconfirm
@@ -487,6 +634,9 @@ function help(){
 #Arguments parsing
 case "$1" in
     -i|--install) setup;;
+    -l|--lvm) LVM=true;;
+    -L|--luks) LUKS=true;;
+    -d|--dualboot) DUALBOOT=true;;
     -v|--version) echo "ArchSecureScript version ${__version}" && exit 0;;
     -c|--configure) configure $1 $2 $3 $4 $5 $6 $7 $8;;
     -h|--help) help;;
