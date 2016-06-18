@@ -602,9 +602,11 @@ function install_xorg(){
 
 function install_graphic_drivers(){
   if [[ ${VIRTUALBOX} == true ]]; then
-    pacman -Syu virtualbox-guest-utils --noconfirm
-  elif [[ ${GRAPH_ENV} == "nothing" ]]; then
-    echo "install_graphic_drivers(): No graph env selected"
+    if [[ ${GRAPH_ENV} == "nothing" ]]; then
+      echo "install_graphic_drivers(): No graph env selected"
+    else
+      pacman -Syu virtualbox-guest-utils --noconfirm
+    fi
   else
     pacman -Syu xf86-video-vesa --noconfirm
   fi
