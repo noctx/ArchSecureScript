@@ -109,6 +109,10 @@ function setup(){
           local YN=true
           GRAPH_ENV="lxde"
           ;;
+        nothing|Nothing|no|No)
+          local YN=true
+          GRAPH_ENV="nothing"
+          ;;
         *)
           echo "Mmmmh... don't understand, only Y or N are authorized. And I'm sure you can do it."
             ;;
@@ -160,7 +164,7 @@ function setup(){
             info "Disk is formatting..."
             format_disk
             info "Disk formatted sucessful"
-            if[[ -z ${LVM} ]] && [[ -z ${LUKS} ]]; then
+            if [[ -z ${LVM} ]] && [[ -z ${LUKS} ]]; then
               info "Creating partition"
               create_partitions_lvm
               info "Partition created sucessful"
@@ -279,10 +283,10 @@ function create_partitions_lvm(){
 
 function prepare_disk_lvm(){
   if [[ ${UEFI} == true ]]; then
-    echo "${PASSWORD}" | cryptsetup -v --cipher aes-xts-plain64 luksFormat ${DISK}2 #It encrypt the LVM using LUKS format with cipher aes-xts-plain64
+    echo "${PASSWORD}" | cryptsetup -v --cipher aes-xts-plain64:sha256 --key-size 512 luksFormat ${DISK}2 #It encrypt the LVM using LUKS format with cipher aes-xts-plain64
     echo "${PASSWORD}" | cryptsetup open --type luks ${DISK}2 lvm #It open the lvm, the decrypted container is now available at /dev/mapper/lvm.
   elif [[ ${UEFI} == false ]]; then
-    echo "${PASSWORD}" | cryptsetup -v --cipher aes-xts-plain64 luksFormat ${DISK}3 #It encrypt the LVM using LUKS format with cipher aes-xts-plain64
+    echo "${PASSWORD}" | cryptsetup -v --cipher aes-xts-plain64:sha256 --key-size 512 luksFormat ${DISK}3 #It encrypt the LVM using LUKS format with cipher aes-xts-plain64
     echo "${PASSWORD}" | cryptsetup open --type luks ${DISK}3 lvm #It open the lvm, the decrypted container is now available at /dev/mapper/lvm.
   fi
 
@@ -353,10 +357,10 @@ function create_partitions_plain(){
 
 function prepare_disk_plain(){
   if [[ ${UEFI} == true ]]; then
-    echo "${PASSWORD}" | cryptsetup -v --cipher aes-xts-plain64 luksFormat ${DISK}2 #It encrypt the LVM using LUKS format with cipher aes-xts-plain64
+    echo "${PASSWORD}" | cryptsetup -v --cipher aes-xts-plain64 --key-size 512 luksFormat ${DISK}2 #It encrypt the LVM using LUKS format with cipher aes-xts-plain64
     echo "${PASSWORD}" | cryptsetup open --type luks ${DISK}2 lvm #It open the lvm, the decrypted container is now available at /dev/mapper/lvm.
   elif [[ ${UEFI} == false ]]; then
-    echo "${PASSWORD}" | cryptsetup -v --cipher aes-xts-plain64 luksFormat ${DISK}3 #It encrypt the LVM using LUKS format with cipher aes-xts-plain64
+    echo "${PASSWORD}" | cryptsetup -v --cipher aes-xts-plain64 --key-size 512 luksFormat ${DISK}3 #It encrypt the LVM using LUKS format with cipher aes-xts-plain64
     echo "${PASSWORD}" | cryptsetup open --type luks ${DISK}3 lvm #It open the lvm, the decrypted container is now available at /dev/mapper/lvm.
   fi
 
@@ -588,12 +592,19 @@ function install_yaourt(){
 }
 
 function install_xorg(){
-  pacman -Syu xorg-server xorg-xinit xorg-server-utils --noconfirm
+  if [[ ${GRAPH_ENV} == "nothing" ]]; then
+    echo "install_xorg(): No graph env selected"
+  else
+    pacman -Syu xorg-server xorg-xinit xorg-server-utils --noconfirm
+  fi
+
 }
 
 function install_graphic_drivers(){
   if [[ ${VIRTUALBOX} == true ]]; then
     pacman -Syu virtualbox-guest-utils --noconfirm
+  elif [[ ${GRAPH_ENV} == "nothing" ]]; then
+    echo "install_graphic_drivers(): No graph env selected"
   else
     pacman -Syu xf86-video-vesa --noconfirm
   fi
@@ -610,6 +621,8 @@ function install_graphic_environment(){
   elif [[ ${GRAPH_ENV} == "lxde" ]]; then
     pacman -S lxde lxdm --noconfirm
     systemctl enable lxdm
+  elif [[ ${GRAPH_ENV} == "nothing" ]]; then
+    echo "install_graphic_environment(): No graph env selected"
   fi
 }
 
