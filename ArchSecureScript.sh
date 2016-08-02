@@ -250,6 +250,7 @@ function create_partitions_lvm(){
   #bios_grub of 1024Kb for grub on GPT table (Without this partitions, the bootloader will not work)
   #boot of 400Mb for /boot
   #home of 100% free for /home
+  #TODO: Add /var specificities
   # +-----------------------------------------------------------------------+ +----------------+
   # | Logical volume1       | Logical volume2       | Logical volume3       | |                |
   # |/dev/storage/swapvol   |/dev/storage/rootvol   |/dev/storage/homevol   | | Boot partition |
@@ -261,12 +262,15 @@ function create_partitions_lvm(){
   if [[ ${UEFI} == true ]]; then
     parted -s ${DISK}\
     mklabel gpt \
-    mkpart primary ext4 4096s 512MB \
-    mkpart primary ext4 512MB 100% \
-    set 1 boot on \
-    set 2 lvm on \
-    name 1 boot \
-    name 2 root_lvm || emergency "Something went wrong with partitioning. You can investigate. Exit 1. "
+    mkpart primary ext4 1MB 2MB \
+    mkpart primary ext4 2MB 513MB \
+    mkpart primary ext4 513MB 100% \
+    set 1 bios_grub on \
+    set 2 boot on \
+    set 3 lvm on \
+    name 1 bios_grub \
+    name 2 boot \
+    name 3 root_lvm || emergency "Something went wrong with partitioning. You can investigate. Exit 1. "
   elif [[ ${UEFI} == false ]]; then
     parted -s ${DISK}\
     mklabel gpt \
@@ -283,8 +287,8 @@ function create_partitions_lvm(){
 
 function prepare_disk_lvm(){
   if [[ ${UEFI} == true ]]; then
-    echo "${PASSWORD}" | cryptsetup -v --cipher aes-xts-plain64:sha256 --key-size 512 luksFormat ${DISK}2 #It encrypt the LVM using LUKS format with cipher aes-xts-plain64
-    echo "${PASSWORD}" | cryptsetup open --type luks ${DISK}2 lvm #It open the lvm, the decrypted container is now available at /dev/mapper/lvm.
+    echo "${PASSWORD}" | cryptsetup -v --cipher aes-xts-plain64:sha256 --key-size 512 luksFormat ${DISK}3 #It encrypt the LVM using LUKS format with cipher aes-xts-plain64
+    echo "${PASSWORD}" | cryptsetup open --type luks ${DISK}3 lvm #It open the lvm, the decrypted container is now available at /dev/mapper/lvm.
   elif [[ ${UEFI} == false ]]; then
     echo "${PASSWORD}" | cryptsetup -v --cipher aes-xts-plain64:sha256 --key-size 512 luksFormat ${DISK}3 #It encrypt the LVM using LUKS format with cipher aes-xts-plain64
     echo "${PASSWORD}" | cryptsetup open --type luks ${DISK}3 lvm #It open the lvm, the decrypted container is now available at /dev/mapper/lvm.
@@ -298,11 +302,13 @@ function prepare_lvm(){
 
   #Create all logical volumes on the volume group
   lvcreate -l 3%VG storage -n swapvol
+  lvcreate -l 5%VG storage -n varvol
   lvcreate -l 25%VG storage -n rootvol
   lvcreate -l +100%FREE storage -n homevol
 
   #Format filesystems on each logical volume
   mkfs.ext4 /dev/mapper/storage-rootvol
+  mkfs.ext4 /dev/mapper/storage-varvol
   mkfs.ext4 /dev/mapper/storage-homevol
   mkswap /dev/mapper/storage-swapvol
 }
@@ -312,6 +318,8 @@ function mount_fs_lvm(){
   mount /dev/storage/rootvol /mnt
   mkdir /mnt/home
   mount /dev/storage/homevol /mnt/home
+  mkdir /mnt/var
+  mount /dev/storage/varvol /mnt/var
   swapon /dev/storage/swapvol
 }
 
@@ -335,12 +343,15 @@ function create_partitions_plain(){
   if [[ ${UEFI} == true ]]; then
     parted -s ${DISK}\
     mklabel gpt \
-    mkpart primary ext4 4096s 512MB \
-    mkpart primary ext4 512MB 100% \
-    set 1 boot on \
-    set 2 lvm on \
-    name 1 boot \
-    name 2 root_lvm || emergency "Something went wrong with partitioning. You can investigate. Exit 1. "
+    mkpart primary ext4 1MB 2MB \
+    mkpart primary ext4 2MB 513MB \
+    mkpart primary ext4 513MB 100% \
+    set 1 bios_grub on \
+    set 2 boot on \
+    set 3 lvm on \
+    name 1 bios_grub \
+    name 2 boot \
+    name 3 root_lvm || emergency "Something went wrong with partitioning. You can investigate. Exit 1. "
   elif [[ ${UEFI} == false ]]; then
     parted -s ${DISK}\
     mklabel gpt \
@@ -357,8 +368,8 @@ function create_partitions_plain(){
 
 function prepare_disk_plain(){
   if [[ ${UEFI} == true ]]; then
-    echo "${PASSWORD}" | cryptsetup -v --cipher aes-xts-plain64 --key-size 512 luksFormat ${DISK}2 #It encrypt the LVM using LUKS format with cipher aes-xts-plain64
-    echo "${PASSWORD}" | cryptsetup open --type luks ${DISK}2 lvm #It open the lvm, the decrypted container is now available at /dev/mapper/lvm.
+    echo "${PASSWORD}" | cryptsetup -v --cipher aes-xts-plain64 --key-size 512 luksFormat ${DISK}3 #It encrypt the LVM using LUKS format with cipher aes-xts-plain64
+    echo "${PASSWORD}" | cryptsetup open --type luks ${DISK}3 lvm #It open the lvm, the decrypted container is now available at /dev/mapper/lvm.
   elif [[ ${UEFI} == false ]]; then
     echo "${PASSWORD}" | cryptsetup -v --cipher aes-xts-plain64 --key-size 512 luksFormat ${DISK}3 #It encrypt the LVM using LUKS format with cipher aes-xts-plain64
     echo "${PASSWORD}" | cryptsetup open --type luks ${DISK}3 lvm #It open the lvm, the decrypted container is now available at /dev/mapper/lvm.
@@ -394,12 +405,15 @@ function create_partitions(){
   if [[ ${UEFI} == true ]]; then
     parted -s ${DISK}\
     mklabel gpt \
-    mkpart primary ext4 4096s 512MB \
-    mkpart primary ext4 512MB 100% \
-    set 1 boot on \
-    set 2 lvm on \
-    name 1 boot \
-    name 2 root_lvm || emergency "Something went wrong with partitioning. You can investigate. Exit 1. "
+    mkpart primary ext4 1MB 2MB \
+    mkpart primary ext4 2MB 513MB \
+    mkpart primary ext4 513MB 100% \
+    set 1 bios_grub on \
+    set 2 boot on \
+    set 3 lvm on \
+    name 1 bios_grub \
+    name 2 boot \
+    name 3 root_lvm || emergency "Something went wrong with partitioning. You can investigate. Exit 1. "
   elif [[ ${UEFI} == false ]]; then
     parted -s ${DISK}\
     mklabel gpt \
@@ -416,8 +430,8 @@ function create_partitions(){
 
 function prepare_disk(){
   if [[ ${UEFI} == true ]]; then
-    echo "${PASSWORD}" | cryptsetup -v --cipher aes-xts-plain64 luksFormat ${DISK}2 #It encrypt the LVM using LUKS format with cipher aes-xts-plain64
-    echo "${PASSWORD}" | cryptsetup open --type luks ${DISK}2 lvm #It open the lvm, the decrypted container is now available at /dev/mapper/lvm.
+    echo "${PASSWORD}" | cryptsetup -v --cipher aes-xts-plain64 luksFormat ${DISK}3 #It encrypt the LVM using LUKS format with cipher aes-xts-plain64
+    echo "${PASSWORD}" | cryptsetup open --type luks ${DISK}3 lvm #It open the lvm, the decrypted container is now available at /dev/mapper/lvm.
   elif [[ ${UEFI} == false ]]; then
     echo "${PASSWORD}" | cryptsetup -v --cipher aes-xts-plain64 luksFormat ${DISK}3 #It encrypt the LVM using LUKS format with cipher aes-xts-plain64
     echo "${PASSWORD}" | cryptsetup open --type luks ${DISK}3 lvm #It open the lvm, the decrypted container is now available at /dev/mapper/lvm.
@@ -439,16 +453,15 @@ function mount_fs(){
 
 function prepare_boot(){
   if [[ ${UEFI} == true ]]; then
-    mkfs.fat -F32 ${DISK}1
-    mkdir -p /mnt/boot/efi
-    mount ${DISK}1 /mnt/boot/efi
+    mkfs.fat -F32 ${DISK}2
+    mkdir /mnt/boot/
+    mount ${DISK}2 /mnt/boot
   elif [[ ${UEFI} == false ]]; then
     mkfs.ext2 ${DISK}2
     mkdir /mnt/boot
     mount ${DISK}2 /mnt/boot
   fi
   #Convert /boot to ext2 format which is the standard for boot partition
-
 }
 
 function install_base(){
@@ -530,13 +543,16 @@ function install_bootloader(){
 
   #Install grub on disk
   if [[ ${UEFI} == true ]]; then
-    echo "GRUB_ENABLE_CRYPTODISK=y" >> /etc/default/grub
+    grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=grub
+    # echo "GRUB_ENABLE_CRYPTODISK=y" >> /etc/default/grub
     sed -i 's|base udev|base udev encrypt lvm2|g' /etc/mkinitcpio.conf
     #Edit grub config to inform it where is the encrypted device and the root device
     sed -i "s|GRUB_CMDLINE_LINUX\=\"|GRUB_CMDLINE_LINUX\=\"cryptdevice=UUID=${CRYPTDEVICE}:storage root=/dev/mapper/storage-rootvol|g" /etc/default/grub
+
     mkinitcpio -p linux
+
     grub-mkconfig -o /boot/grub/grub.cfg
-    grub-install ${DISK}
+
   elif [[ ${UEFI} == false ]]; then
     grub-install --target=i386-pc ${DISK}
     #Edit mkinitcpio configuration to add encrypt and lvm2 module to HOOKS
@@ -608,7 +624,11 @@ function install_graphic_drivers(){
       pacman -Syu virtualbox-guest-utils --noconfirm
     fi
   else
-    pacman -Syu xf86-video-vesa --noconfirm
+    if [[ ${GRAPH_ENV} == "nothing" ]]; then
+      echo "install_graphic_drivers(): No graph env selected"
+    else
+      pacman -Syu xf86-video-vesa --noconfirm
+    fi
   fi
 }
 
